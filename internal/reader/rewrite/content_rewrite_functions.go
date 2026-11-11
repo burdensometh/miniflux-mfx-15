@@ -18,7 +18,11 @@ import (
 var textLinkRegex = regexp.MustCompile(`(^|[^"'])(https?://[^"\s]+)`)
 
 // applyToSelection runs fn over every node matching selector and returns the
-// serialized result of those nodes.
+// serialized document. When the selector matches nothing, the original content
+// is returned unchanged. Note that a rule may legitimately empty the content
+// (e.g. remove("p") on a document made only of paragraphs): that is a match,
+// not a no-op, so the emptiness of the output is never used to decide whether
+// to keep the original.
 func applyToSelection(entryContent, selector string, fn func(*goquery.Selection)) string {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(entryContent))
 	if err != nil {
@@ -26,11 +30,19 @@ func applyToSelection(entryContent, selector string, fn func(*goquery.Selection)
 	}
 
 	selection := doc.Find(selector)
+	if selection.Length() == 0 {
+		// No match: the rule does not apply, keep the original content.
+		return entryContent
+	}
+
 	selection.Each(func(_ int, s *goquery.Selection) {
 		fn(s)
 	})
 
-	output, _ := selection.Html()
+	output, err := doc.Find("body").Html()
+	if err != nil {
+		return entryContent
+	}
 	return output
 }
 
@@ -185,7 +197,13 @@ func applyFuncOnTextContent(entryContent string, selector string, repl func(stri
 		return entryContent
 	}
 
-	doc.Find(selector).Each(func(_ int, s *goquery.Selection) {
+	selection := doc.Find(selector)
+	if selection.Length() == 0 {
+		// No match: keep the original content untouched.
+		return entryContent
+	}
+
+	selection.Each(func(_ int, s *goquery.Selection) {
 		if s.Nodes[0].Type == 3 {
 			s.ReplaceWithHtml(repl(s.Nodes[0].Data))
 		}
